@@ -1,0 +1,60 @@
+/* Design tokens from SENDLY_DESIGN_GUIDE.md (Quiet White). Dark mode is out of scope for the first release. */
+:root {
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  --canvas: #ffffff;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafc;
+  --surface-pressed: #f1f5f9;
+  --text-primary: #111827;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --control-border: #64748b;
+  --action: #111827;
+  --action-hover: #1f2937;
+  --accent: #1d4ed8;
+  --accent-soft: #eff6ff;
+  --success: #166534;
+  --success-soft: #f0fdf4;
+  --warning: #92400e;
+  --warning-soft: #fffbeb;
+  --danger: #b91c1c;
+  --danger-soft: #fef2f2;
+
+  --radius-control: 10px;
+  --radius-card: 16px;
+  --shadow-card: 0 4px 20px rgb(15 23 42 / 0.04);
+  --content-max: 1120px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-primary);
+  background: var(--canvas);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.amount,
+.balance,
+.fee {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  overflow-wrap: anywhere;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}

@@ -1,0 +1,23 @@
+[project]
+name = "sendly-api"
+version = "0.1.0"
+description = "Sendly backend: payment validation, chain verification, and (Phase 1) the signer gate harness"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.142.2",
+    "uvicorn[standard]==0.54.0",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "httpx==0.28.1",
+    "pyjwt[crypto]==2.15.1",
+    "eth-account==0.14.0",
+    "eth-abi==6.0.0",
+    "eth-utils==6.0.0",
+    "hexbytes==2.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
