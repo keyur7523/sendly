@@ -66,7 +66,14 @@ export type WalletInfo = {
 
 export type GateCase = "pinned_send" | "pinned_sign_only" | "explicit_rejection" | "same_nonce_replacement" | "wallet_type";
 
-export function toWalletRequest(p: Prepared): UnsignedTransactionRequest {
+export type NonceEncoding = "hex" | "number";
+
+/**
+ * Privy 3.47.0 treats the nonce with a truthiness check (`nonce ? BigInt(nonce) : undefined`),
+ * so a numeric 0 is dropped and replaced by the account nonce. A hex string survives ("0x0" is
+ * truthy). Hex is the default; "number" exists only for the signer gate comparison.
+ */
+export function toWalletRequest(p: Prepared, nonceEncoding: NonceEncoding = "hex"): UnsignedTransactionRequest {
   const r = p.wallet_request;
   return {
     chainId: r.chainId,
@@ -74,7 +81,7 @@ export function toWalletRequest(p: Prepared): UnsignedTransactionRequest {
     to: r.to,
     data: r.data,
     value: r.value,
-    nonce: r.nonce,
+    nonce: nonceEncoding === "hex" ? `0x${BigInt(r.nonce).toString(16)}` : r.nonce,
     gasLimit: r.gasLimit,
     maxFeePerGas: r.maxFeePerGas,
     maxPriorityFeePerGas: r.maxPriorityFeePerGas,

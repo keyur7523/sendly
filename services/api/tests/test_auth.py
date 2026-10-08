@@ -59,3 +59,17 @@ def test_rejects_algorithm_confusion(keys):
     )
     with pytest.raises(InvalidToken):
         verify_access_token(forged, app_id=APP_ID, verification_key=public)
+
+
+@pytest.mark.parametrize("form", ["pem", "escaped", "bare"])
+def test_verification_key_formats(keys, form, monkeypatch):
+    """The dashboard shows a bare base64 body; full PEM and \\n-escaped PEM also work."""
+    from app.config import Settings
+
+    private, public = keys
+    body = "".join(line for line in public.splitlines() if "-----" not in line)
+    value = {"pem": public, "escaped": public.replace("\n", "\\n"), "bare": body}[form]
+    monkeypatch.setenv("PRIVY_VERIFICATION_KEY", value)
+    settings = Settings(_env_file=None)
+    user = verify_access_token(token(private), app_id=APP_ID, verification_key=settings.privy_verification_key)
+    assert user.privy_did == "did:privy:abc"

@@ -30,4 +30,5 @@ Monad's reserve-balance rules (PRD Section 10.3) mean a wallet with very little 
 
 | Network | Contract | Address | Deployed |
 |---|---|---|---|
-| Monad testnet (10143) | DemoUSD | _not yet deployed_ | |
+| Monad testnet (10143) | DemoUSD | `0x701C0eAB78ba95d7604Ee316C52e8FF88f63a9F5` | 2026-10-07, owner `0x4205E140DcF661BDe478236CD760386B12F3c197` |
+| Monad testnet (10143) | DemoUSD (abandoned) | `0x7E7DfFC7D515Eb6F7E5BB0919B95597f33F9F1f4` | 2026-10-07; owner set to Foundry's placeholder sender by a script bug, cannot mint. Do not use. |

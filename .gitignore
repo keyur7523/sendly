@@ -20,3 +20,4 @@ contracts/*/broadcast/*/dry-run/
 
 # OS
 .DS_Store
+*.egg-info/

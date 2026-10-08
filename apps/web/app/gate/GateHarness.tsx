@@ -6,6 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import {
   type Comparison,
   type GateCase,
+  type NonceEncoding,
   type Prepared,
   type Verification,
   type WalletInfo,
@@ -19,6 +20,8 @@ const SDK_PACKAGE = "@privy-io/react-auth";
 const SDK_VERSION = process.env.NEXT_PUBLIC_PRIVY_SDK_VERSION ?? "unknown";
 const POLL_INTERVAL_MS = 1500;
 const POLL_TIMEOUT_MS = 90_000;
+// A wallet call that never settles is an unknown outcome (PRD Section 10.2), never a frozen page.
+const WALLET_TIMEOUT_MS = 120_000;
 
 type Call = <T>(path: string, body?: unknown) => Promise<T>;
 type LogEntry = { label: string; data: unknown };
@@ -233,6 +236,10 @@ function SignOnlyCase({ call, address, onChainChange }: CaseProps) {
   const { signTransaction } = useSignTransaction();
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("0.01");
+  const [nonceOverride, setNonceOverride] = useState("");
+  const [nonceEncoding, setNonceEncoding] = useState<NonceEncoding>("hex");
+  const [kind, setKind] = useState<"token_transfer" | "self_transfer">("token_transfer");
+  const [feeGwei, setFeeGwei] = useState("");
   const { log, push, reset, busy, run } = useLog();
   const [pending, setPending] = useState<{ prepared: Prepared; signed: string } | null>(null);
   const [inspection, setInspection] = useState<{ comparison: Comparison; tx_hash: string } | null>(null);
@@ -246,9 +253,17 @@ function SignOnlyCase({ call, address, onChainChange }: CaseProps) {
       setInspection(null);
       setVerification(null);
       setUndecodable(false);
-      const prepared = await prepareTransfer(call, address, recipient || address, amount);
+      const prepared = await call<Prepared>("/v1/gate/prepare", {
+        sender: address,
+        kind,
+        ...(kind === "token_transfer" ? { recipient: recipient || address, amount } : {}),
+        nonce: nonceOverride === "" ? undefined : Number(nonceOverride),
+        max_fee_per_gas_gwei: feeGwei === "" ? undefined : Number(feeGwei),
+      });
       push("Prepared (pinned)", prepared.pinned);
-      const { signature } = await signTransaction(toWalletRequest(prepared), { address });
+      const request = toWalletRequest(prepared, nonceEncoding);
+      push("Nonce sent to wallet", { encoding: nonceEncoding, value: request.nonce });
+      const { signature } = await signTransaction(request, { address });
       push("signTransaction returned", signature);
       try {
         const inspected = await call<{ comparison: Comparison; tx_hash: string }>("/v1/gate/inspect-signed", {
@@ -290,6 +305,48 @@ function SignOnlyCase({ call, address, onChainChange }: CaseProps) {
     >
       <TransferInputs recipient={recipient} setRecipient={setRecipient} amount={amount} setAmount={setAmount} />
       <div className={styles.row}>
+        <label className={styles.field}>
+          Nonce override (blank = current nonce; a spent nonce such as 0 is safe because it can never be included)
+          <input
+            inputMode="numeric"
+            value={nonceOverride}
+            onChange={(e) => setNonceOverride(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder="current"
+          />
+        </label>
+        <label className={styles.field}>
+          Transaction
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as "token_transfer" | "self_transfer")}
+            style={{ height: 48, borderRadius: "var(--radius-control)", font: "inherit", fontSize: 16 }}
+          >
+            <option value="token_transfer">DemoUSD transfer (payment)</option>
+            <option value="self_transfer">0 MON self-transfer (replacement)</option>
+          </select>
+        </label>
+        <label className={styles.field}>
+          maxFeePerGas override in gwei (blank = quote; below base fee keeps it pending)
+          <input
+            inputMode="numeric"
+            value={feeGwei}
+            onChange={(e) => setFeeGwei(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder="quote"
+          />
+        </label>
+        <label className={styles.field}>
+          Nonce encoding sent to the wallet
+          <select
+            value={nonceEncoding}
+            onChange={(e) => setNonceEncoding(e.target.value as NonceEncoding)}
+            style={{ height: 48, borderRadius: "var(--radius-control)", font: "inherit", fontSize: 16 }}
+          >
+            <option value="hex">hex string (e.g. &quot;0x3&quot;)</option>
+            <option value="number">number (e.g. 3)</option>
+          </select>
+        </label>
+      </div>
+      <div className={styles.row}>
         <button className={styles.primary} disabled={busy} onClick={sign}>
           Prepare and sign (no broadcast)
         </button>
@@ -317,42 +374,58 @@ function SignOnlyCase({ call, address, onChainChange }: CaseProps) {
 }
 
 /** Check 2: is an explicit user rejection distinguishable from other failures? */
+type RejectionVariant = "close_button" | "escape_key" | "non_rejection_error";
+
 function RejectionCase({ call, address }: CaseProps) {
   const { sendTransaction } = useSendTransaction();
   const { log, push, reset, busy, run } = useLog();
-  const [captured, setCaptured] = useState<Record<string, unknown>>({});
+  const [captured, setCaptured] = useState<Partial<Record<RejectionVariant, Record<string, unknown>>>>({});
 
-  const attempt = (variant: "reject_button" | "close_modal" | "non_rejection_error") =>
+  const attempt = (variant: RejectionVariant) =>
     run(async () => {
-      if (variant === "reject_button") reset();
-      const prepared = await prepareTransfer(call, address, address, "0.01");
-      const request = toWalletRequest(prepared);
-      // The non-rejection variant asks for an unsupported chain, to see a failure that is not a user decision.
-      if (variant === "non_rejection_error") request.chainId = 1;
+      if (variant === "close_button") reset();
+      // The non-rejection variant reuses nonce 0, which this wallet has already spent: the user
+      // approves, and the failure comes from the network, not from a user decision.
+      const prepared =
+        variant === "non_rejection_error"
+          ? await call<Prepared>("/v1/gate/prepare", {
+              sender: address,
+              kind: "token_transfer",
+              recipient: address,
+              amount: "0.01",
+              nonce: 0,
+            })
+          : await prepareTransfer(call, address, address, "0.01");
       try {
-        const { hash } = await sendTransaction(request, { address });
+        const { hash } = await withTimeout(sendTransaction(toWalletRequest(prepared), { address }), WALLET_TIMEOUT_MS);
         push(`${variant}: unexpectedly succeeded`, hash);
       } catch (e) {
-        const described = describeError(e);
+        const described = e instanceof WalletTimeout ? { timeout: true, message: e.message } : describeError(e);
         push(`${variant}: error`, described);
         setCaptured((c) => ({ ...c, [variant]: described }));
       }
     });
 
+  const code = (v: RejectionVariant) => captured[v]?.code;
+  const suggested: Verdict =
+    captured.close_button && captured.escape_key && captured.non_rejection_error
+      ? code("close_button") === 4001 && code("escape_key") === 4001 && code("non_rejection_error") !== 4001
+      : null;
+
   return (
     <CaseCard
       title="Gate check 2 · Explicit rejection is distinguishable"
-      description="Run each variant. For the first, press the wallet's reject/cancel control; for the second, close the wallet modal. Pass only if both rejection variants produce an error that can be told apart from the non-rejection error by a stable field (not message text)."
+      description="Privy's approval screen has Approve and ✕ only. Variant 1: press ✕. Variant 2: press Esc. Variant 3: press Approve; the transaction reuses a spent nonce, so the network rejects it and nothing moves. Pass only if both refusals give an error that a stable field (not message text) distinguishes from the network failure."
     >
       <div className={styles.row}>
-        <button className={styles.secondary} disabled={busy} onClick={() => attempt("reject_button")}>
-          1. Send, then press Reject
+        <button className={styles.secondary} disabled={busy} onClick={() => attempt("close_button")}>
+          1. Send, then press ✕
         </button>
-        <button className={styles.secondary} disabled={busy} onClick={() => attempt("close_modal")}>
-          2. Send, then close the modal
+        <button className={styles.secondary} disabled={busy} onClick={() => attempt("escape_key")}>
+          2. Send, then press Esc
         </button>
         <button className={styles.secondary} disabled={busy} onClick={() => attempt("non_rejection_error")}>
-          3. Trigger a non-rejection error
+          3. Send at a spent nonce, then Approve
         </button>
       </div>
       <Log entries={log} />
@@ -360,7 +433,7 @@ function RejectionCase({ call, address }: CaseProps) {
         call={call}
         gateCase="explicit_rejection"
         mode="send"
-        suggested={null}
+        suggested={suggested}
         defaultSummary="Compare the captured error shapes and state which stable field distinguishes rejection"
         details={{ captured }}
       />
@@ -463,8 +536,23 @@ function ReplacementCase({ call, address, onChainChange }: CaseProps) {
 
 /* ---------- shared pieces ---------- */
 
-async function prepareTransfer(call: Call, sender: string, recipient: string, amount: string) {
-  return call<Prepared>("/v1/gate/prepare", { sender, kind: "token_transfer", recipient, amount });
+class WalletTimeout extends Error {}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new WalletTimeout(`No result from the wallet after ${ms / 1000}s; outcome unknown`)),
+      ms,
+    );
+    promise.then(
+      (value) => (clearTimeout(timer), resolve(value)),
+      (error) => (clearTimeout(timer), reject(error)),
+    );
+  });
+}
+
+async function prepareTransfer(call: Call, sender: string, recipient: string, amount: string, nonce?: number) {
+  return call<Prepared>("/v1/gate/prepare", { sender, kind: "token_transfer", recipient, amount, nonce });
 }
 
 async function pollVerify(

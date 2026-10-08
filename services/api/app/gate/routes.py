@@ -52,6 +52,9 @@ class PrepareRequest(BaseModel):
     recipient: str | None = None
     amount: str | None = Field(default=None, description="Exact decimal string, e.g. '1.50'")
     nonce: int | None = Field(default=None, ge=0, description="Override, for the replacement case only")
+    max_fee_per_gas_gwei: int | None = Field(
+        default=None, ge=1, le=10_000, description="Harness override, e.g. below the base fee to keep a tx pending"
+    )
 
 
 class SignedRequest(BaseModel):
@@ -142,14 +145,15 @@ async def prepare(
     store: Store,
     settings: Annotated[Settings, Depends(get_settings)],
 ):
+    fee_override = body.max_fee_per_gas_gwei * 10**9 if body.max_fee_per_gas_gwei else None
     try:
         if body.kind == "token_transfer":
             if not body.recipient or not body.amount:
                 raise PayloadError("token_transfer requires recipient and amount")
             amount = parse_amount(body.amount, settings.demo_token_decimals)
-            tx = await chain.pin_token_transfer(body.sender, body.recipient, amount, body.nonce)
+            tx = await chain.pin_token_transfer(body.sender, body.recipient, amount, body.nonce, fee_override)
         else:
-            tx = await chain.pin_self_transfer(body.sender, body.nonce)
+            tx = await chain.pin_self_transfer(body.sender, body.nonce, fee_override)
     except PayloadError as exc:
         raise _error(400, "AMOUNT_INVALID" if body.amount else "INVALID_REQUEST", str(exc)) from None
     except TokenNotConfigured as exc:

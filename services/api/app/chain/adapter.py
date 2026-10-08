@@ -102,23 +102,43 @@ class ChainAdapter:
         return estimate + estimate * self._settings.gas_margin_bps // 10_000
 
     async def pin_token_transfer(
-        self, sender: str, recipient: str, amount_base_units: int, nonce: int | None = None
+        self,
+        sender: str,
+        recipient: str,
+        amount_base_units: int,
+        nonce: int | None = None,
+        max_fee_per_gas: int | None = None,
     ) -> PinnedTransaction:
         token = self._require_token()
         sender = require_address(sender, "sender")
         data = encode_token_transfer(recipient, amount_base_units)
         gas = await self.estimate_gas(sender, token, data, 0)
-        return await self._pin(sender, token, data, 0, gas, nonce)
+        return await self._pin(sender, token, data, 0, gas, nonce, max_fee_per_gas)
 
-    async def pin_self_transfer(self, sender: str, nonce: int | None = None) -> PinnedTransaction:
+    async def pin_self_transfer(
+        self, sender: str, nonce: int | None = None, max_fee_per_gas: int | None = None
+    ) -> PinnedTransaction:
         """Zero-value transfer to self: the replacement transaction shape (PRD Section 10.6)."""
         sender = require_address(sender, "sender")
-        return await self._pin(sender, sender, "0x", 0, self._settings.native_transfer_gas, nonce)
+        return await self._pin(sender, sender, "0x", 0, self._settings.native_transfer_gas, nonce, max_fee_per_gas)
 
     async def _pin(
-        self, sender: str, to: str, data: str, value: int, gas: int, nonce: int | None
+        self,
+        sender: str,
+        to: str,
+        data: str,
+        value: int,
+        gas: int,
+        nonce: int | None,
+        max_fee_per_gas: int | None = None,
     ) -> PinnedTransaction:
         fees = await self.fee_quote()
+        if max_fee_per_gas is not None:
+            # Signer-gate harness only: deliberately price a transaction (e.g. below the base fee
+            # so it stays pending). The priority fee can never exceed the max fee.
+            fees = FeeQuote(
+                fees.base_fee_per_gas, min(fees.max_priority_fee_per_gas, max_fee_per_gas), max_fee_per_gas
+            )
         return PinnedTransaction(
             chain_id=self._settings.chain_id,
             sender=sender,

@@ -294,3 +294,25 @@ def test_token_transfer_without_configured_token(client, auth_header, monkeypatc
         headers=auth_header(),
     )
     assert r.status_code == 503 and r.json()["detail"]["code"] == "UNSUPPORTED_ASSET"
+
+
+def test_fee_override_prices_below_base_fee(client, auth_header):
+    """Harness override used to create a pending transaction for the replacement check."""
+    acct = Account.create()
+    r = client.post(
+        "/v1/gate/prepare",
+        json={"sender": acct.address, "kind": "token_transfer", "recipient": RECIPIENT, "amount": "1", "max_fee_per_gas_gwei": 1},
+        headers=auth_header(),
+    )
+    pinned = r.json()["pinned"]
+    assert pinned["max_fee_per_gas"] == str(10**9)
+    assert pinned["max_priority_fee_per_gas"] == str(10**9)  # capped at the max fee
+
+
+def test_fee_override_rejects_zero(client, auth_header):
+    r = client.post(
+        "/v1/gate/prepare",
+        json={"sender": Account.create().address, "kind": "self_transfer", "max_fee_per_gas_gwei": 0},
+        headers=auth_header(),
+    )
+    assert r.status_code == 422

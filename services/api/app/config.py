@@ -13,9 +13,9 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    privy_app_id: str
+    privy_app_id: str = Field(min_length=1)
     # PEM public key from the Privy dashboard. "\n" escapes are accepted so it fits on one line.
-    privy_verification_key: str
+    privy_verification_key: str = Field(min_length=1)
 
     chain_id: int = 10143
     rpc_url: str = "https://testnet-rpc.monad.xyz"
@@ -35,8 +35,15 @@ class Settings(BaseSettings):
 
     @field_validator("privy_verification_key")
     @classmethod
-    def _unescape_pem(cls, value: str) -> str:
-        return value.replace("\\n", "\n").strip()
+    def _normalize_pem(cls, value: str) -> str:
+        """Accept a full PEM block, a PEM with "\\n" escapes, or the bare base64 key body
+        that the Privy dashboard displays; return a PEM block."""
+        value = value.replace("\\n", "\n").strip()
+        if value.startswith("-----BEGIN"):
+            return value
+        body = "".join(value.split())
+        lines = [body[i : i + 64] for i in range(0, len(body), 64)]
+        return "\n".join(["-----BEGIN PUBLIC KEY-----", *lines, "-----END PUBLIC KEY-----"])
 
 
 @lru_cache
