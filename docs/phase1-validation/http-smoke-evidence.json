@@ -1,0 +1,22 @@
+{
+  "api_health": {
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  "api_auth_required": {
+    "status": 401,
+    "expected": 401,
+    "pass": true
+  },
+  "web_home": {
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  },
+  "web_gate": {
+    "status": 200,
+    "expected": 200,
+    "pass": true
+  }
+}

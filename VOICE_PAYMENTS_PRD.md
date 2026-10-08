@@ -2,7 +2,7 @@
 
 **Working name:** Sendly (placeholder; availability not checked)  
 **Owner:** Keyur Pawaskar  
-**Version:** 1.4 — October 5, 2026 (see Section 28)  
+**Version:** 1.5 — October 7, 2026 (see Section 28)  
 **Status:** Product and engineering specification; no implementation or deployment implied  
 **Frontend:** Next.js, React, TypeScript  
 **Backend:** Python, FastAPI, PostgreSQL  
@@ -571,16 +571,28 @@ reject with LIMIT_EXCEEDED if committed + proposed > daily_outgoing_amount
 
 ### 10.4 Signing and the signer gate
 
-**Default:** the browser invokes the authenticated user's embedded-wallet signing flow using a reviewed SDK. Python prepares and validates the unsigned payload; it does not hold the user's private key. Privy's React transaction API is one supported implementation candidate. [S1]
+**Execution path: sign-only plus backend broadcast.** The browser asks the authenticated user's embedded wallet to **sign** the prepared transaction without broadcasting it (Privy `useSignTransaction`). [S1] The backend then validates and broadcasts it. Python prepares and validates the unsigned payload and never holds the user's private key. The wallet's send-and-broadcast mode is not used on the product path: it returns no hash until the user dismisses the wallet's success screen, and its error screen offers a retry that can resend at a fresh nonce. Send mode remains only in the diagnostic signer harness.
 
-The prepared payload is a type-2 (EIP-1559) transaction with explicit `chainId`, `to` (token contract), `data`, `value` = 0, `nonce`, `gas`, `maxFeePerGas`, and `maxPriorityFeePerGas`. The frontend checks that the selected wallet and chain match before invoking the SDK and passes every field through. Retain provider-required authorization prompts. Voice approval is app-level consent; it does not bypass wallet authentication or guarantee hands-free execution on every provider/device.
+The prepared payload is a type-2 (EIP-1559) transaction with explicit `chainId`, `to` (token contract), `data`, `value` = 0, `nonce`, `gas`, `maxFeePerGas`, and `maxPriorityFeePerGas`. The frontend checks that the selected wallet and chain match before invoking the SDK and passes every field through. **Quantities, including the nonce, are passed to the wallet as hex strings**: Privy 3.47.0 drops a numeric `0` nonce through a truthiness check and fills the account nonce instead. Every wallet call has a timeout; no result within it is an unknown outcome (Section 10.2), never a failure. Retain provider-required authorization prompts. Voice approval is app-level consent; it does not bypass wallet authentication or guarantee hands-free execution on every provider/device.
+
+**Backend executor requirements (build stage B3).** Between signature and broadcast the backend is the validation boundary:
+
+1. The per-wallet nonce reservation (Section 9.3) is opened and locked **before** the signature is requested.
+2. The returned signed transaction is decoded and checked against the approved revision and the attempt: sender, chain ID, `to`, `data`, `value`, nonce, gas limit, and fee fields. A mismatched, stale (approval spent or expired), or conflicting submission is rejected and **not broadcast**.
+3. The signed transaction bytes, hash, nonce, and a broadcast job are persisted **atomically, before anything is sent**. Storing only the hash is insufficient: after a crash the backend must be able to rebroadcast the identical bytes.
+4. The backend broadcasts after validating the RPC's chain ID. After a timeout it reconciles the known hash and rebroadcasts the **same bytes**; it never requests a new signature at a new nonce for the same payment.
+5. Sendly's review card is the substantive payment review surface. The wallet prompt may not show the transfer amount (Privy's shows the wallet balance) and is not described as an independent confirmation of recipient and amount.
+
+The signer harness under `/gate` is a measurement tool, not this executor.
 
 **Signer gate (release blocker).** Payment execution is enabled only for a **signer qualification**: a specific wallet provider, SDK version, and wallet type with a recorded passing gate result on the target network. The gate requires that the signer:
 
-1. broadcasts exactly the supplied nonce, gas limit, `maxFeePerGas`, and `maxPriorityFeePerGas`, or returns an error instead of silently changing them;
-2. returns a distinguishable result for explicit user rejection;
-3. can sign a zero-value self-transfer at a specified nonce while an earlier transaction at that nonce may still be pending (for replacement); and
+1. **signs exactly the requested transaction** in sign-only mode: the decoded signed transaction carries the supplied nonce (including nonce 0, when passed in the encoding the integration uses), gas limit, `maxFeePerGas`, `maxPriorityFeePerGas`, recipient, data, value, and chain ID, or the call errors instead of silently changing them;
+2. returns a distinguishable result for explicit user refusal, different from a network or provider failure;
+3. **signs a replacement as requested while another transaction at that nonce is outstanding**: a zero-value self-transfer at the specified nonce with the requested fee fields, decoded and verified. Whether the replacement is then *included* is a property of the network, recorded separately in the gate report and not a signer criterion; and
 4. creates undelegated EOAs, or the product's reserve handling has been extended for the wallet type it creates.
+
+Every criterion is judged on decoded signer output, not on whether a transaction later wins a race on-chain.
 
 The result is recorded in `docs/signer-gate.md` and referenced by an environment setting. If no qualification is configured, `prepare` returns `SIGNER_NOT_QUALIFIED`. There is no reduced-capability execution mode in the first release: if the configured signer fails the gate, payment execution is not released, and the fix is a different signer or SDK version, not a different label. Upgrading the SDK requires running the gate again.
 
@@ -609,6 +621,8 @@ Do not introduce a Node business service solely for signing. Server-delegated si
 Do not infer success merely from finding a historical transfer with the same amount and recipient. Correlate by sender, nonce, and payload, and inspect the actual transaction. An idempotency key in PostgreSQL alone cannot guarantee exactly-once broadcast through an external wallet; document this limitation and test the crash window explicitly.
 
 ### 10.6 Replacement attempts
+
+> **Observed on Monad testnet (2026-10-07), single observation.** A transaction queued behind a nonce gap was "accepted" by the RPC but not visible; a higher-fee replacement at the same nonce was also "accepted"; when the gap was filled the **original** was included and the replacement never was. Transactions priced below the base fee are rejected at submission. Until Monad's replacement semantics are confirmed, treat replacement as best-effort: it cannot be the only recovery path, RPC acceptance is not evidence of inclusion, and the executor must never create nonce gaps (allocate from the chain's current nonce, one unresolved attempt per wallet). Reconciliation by sender + nonce + payload remains authoritative.
 
 For a group that stays open past a configured period with its payment attempt unresolved, the user may choose to sign a **replacement**: a zero-value transfer to their own address at nonce N. It competes with the original payment and cannot undo it. If the payment is finalized first, the replacement cannot be included; if the replacement is finalized first, the payment cannot be included. Whether a higher fee makes the replacement more likely to win depends on the network and provider and is measured in the signer gate, not promised. Copy states plainly that this is an attempt to stop the payment, not a cancellation.
 
@@ -1257,7 +1271,7 @@ Dependencies and completion checkpoints only; no dates. Each stage ends in somet
 |---|---|---|---|
 | B0. Foundations | — | Repository, configuration, FastAPI skeleton, PostgreSQL and migrations, provider token verification, wallet binding | AUTH-01/02 tests pass, including cross-user denial |
 | B1. Chain and token | B0 configuration | Demo ERC-20 in `contracts/`, testnet deployment, chain adapter (balances, gas estimate, reserve-rule evaluation, `finalized` queries, transaction and receipt verification), manual funding guide | A scripted transfer from a funded test wallet is verified through `included` to `succeeded` by the adapter |
-| B2. Signer gate | B0, B1 | Embedded wallet in a minimal page; send a prepared type-2 transaction with pinned nonce and fee fields; explicit rejection; replacement at a possibly pending nonce; wallet type; record SDK version | `docs/signer-gate.md` records a pass for every gate item, or the signer choice is revisited before B3 |
+| B2. Signer gate | B0, B1 | Embedded wallet in a minimal page; sign a prepared type-2 transaction with pinned (hex) nonce and fee fields; refusal vs failure; replacement signed while another transaction at that nonce is outstanding; wallet type; record SDK version | `docs/signer-gate.md` records a pass for every gate item under the Section 10.4 criteria, or the signer choice is revisited before B3 |
 | B3. Payment core | B1, B2 | Contacts with assurance levels, drafts and review revisions, challenges, approvals, limits, nonce reservations, payment and replacement attempts, `wallet-result`, matching and compliance, reconciliation worker, all Section 12.1 rules | Through the API with button approval: draft → review → approve → sign → `succeeded`; integrity, concurrency, and crash-injection tests pass |
 | B4. Text conversation and workspace | B3 | Conversations, intent parser, dialogue controller, read-back templates, workspace UI, activity, recovery panel | The Definition of done passes for the text and button path; this is the first complete demo |
 | B5. Voice | B4 | Voice sessions, WebSocket, audio capture, STT, TTS, push-to-talk, Stop read-back, confirmation grammar | Spoken payment with correction after read-back reaches `succeeded`; grammar and stale-confirmation tests pass |
@@ -1320,3 +1334,11 @@ Sources consulted October 5, 2026. Product requirements above are original desig
 
 - Backend `capabilities` object with `allowed` and `reason` per action (Section 13.3); advisory for rendering, enforced again by every endpoint.
 - Layout ownership moved to the Sendly design guide (Section 7.3); `readback_ready` carries playback timings when available, for the speaking payment card.
+
+**1.5 (October 7, 2026).** Phase 1 signer-gate findings folded in; no change to product scope.
+
+- Execution path specified as sign-only plus backend broadcast; send mode limited to the diagnostic harness (Section 10.4).
+- Backend executor requirements: lock before signing, validate the decoded signed transaction against the approval and reject mismatches, persist signed bytes + hash + nonce + broadcast job before sending, rebroadcast identical bytes after timeouts.
+- Quantities including the nonce passed to the wallet as hex strings; every wallet call has a timeout that yields an unknown outcome.
+- Signer-gate criteria judged on decoded signer output; replacement inclusion recorded as a network property, not a signer criterion.
+- Section 10.6: Monad testnet observation that a same-nonce replacement did not displace a queued transaction; replacement treated as best-effort and nonce gaps forbidden.

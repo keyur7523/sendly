@@ -21,6 +21,7 @@ PRIORITY = 2_000_000_000
 
 class FakeNode:
     def __init__(self):
+        self.chain_id = 10143
         self.nonce = 5
         self.code = "0x"
         self.transactions: dict[str, dict] = {}
@@ -41,7 +42,7 @@ class FakeNode:
     def dispatch(self, method, params):
         match method:
             case "eth_chainId":
-                return hex(10143)
+                return hex(self.chain_id)
             case "eth_getTransactionCount":
                 return hex(self.nonce)
             case "eth_getCode":
@@ -316,3 +317,59 @@ def test_fee_override_rejects_zero(client, auth_header):
         headers=auth_header(),
     )
     assert r.status_code == 422
+
+
+
+def test_prepare_refuses_wrong_network(client, auth_header, node):
+    node.chain_id = 1
+    r = client.post(
+        "/v1/gate/prepare",
+        json={"sender": Account.create().address, "kind": "self_transfer"},
+        headers=auth_header(),
+    )
+    assert r.status_code == 503 and r.json()["detail"]["code"] == "WRONG_NETWORK"
+    assert "eth_sendRawTransaction" not in node.calls
+
+
+def test_broadcast_refuses_mismatched_signed_transaction(client, auth_header, node):
+    acct = Account.create()
+    out = prepare_transfer(client, auth_header(), acct.address)
+    raw, _ = sign(acct, out["pinned"], maxFeePerGas=999 * 10**9)
+    r = client.post(
+        "/v1/gate/broadcast", json={"prepared_id": out["prepared_id"], "signed_transaction": raw}, headers=auth_header()
+    )
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "SIGNED_TRANSACTION_MISMATCH"
+    assert "eth_sendRawTransaction" not in node.calls
+
+    r = client.post(
+        "/v1/gate/broadcast",
+        json={"prepared_id": out["prepared_id"], "signed_transaction": raw, "allow_mismatch": True},
+        headers=auth_header(),
+    )
+    assert r.status_code == 200 and r.json()["broadcast"] == "accepted"
+
+
+def test_broadcast_refuses_wrong_network(client, auth_header, node):
+    acct = Account.create()
+    out = prepare_transfer(client, auth_header(), acct.address)
+    raw, _ = sign(acct, out["pinned"])
+    node.chain_id = 1
+    r = client.post(
+        "/v1/gate/broadcast", json={"prepared_id": out["prepared_id"], "signed_transaction": raw}, headers=auth_header()
+    )
+    assert r.status_code == 503 and r.json()["detail"]["code"] == "WRONG_NETWORK"
+    assert "eth_sendRawTransaction" not in node.calls
+
+
+def test_prepare_rejects_bad_checksum_recipient(client, auth_header):
+    r = client.post(
+        "/v1/gate/prepare",
+        json={
+            "sender": Account.create().address,
+            "kind": "token_transfer",
+            "recipient": "0xFa339b0Fc9D01073AF67B668ba5813d677B85956",
+            "amount": "1",
+        },
+        headers=auth_header(),
+    )
+    assert r.status_code == 400

@@ -151,3 +151,71 @@ def test_find_transfer_event():
     assert find_transfer_event({"logs": [log]}, TOKEN, sender, RECIPIENT, 15_000_000)
     assert not find_transfer_event({"logs": [log]}, TOKEN, sender, RECIPIENT, 14_000_000)
     assert not find_transfer_event({"logs": [{**log, "address": RECIPIENT}]}, TOKEN, sender, RECIPIENT, 15_000_000)
+
+
+# --- Regression tests from the Phase 1 hardening review -------------------------------------
+
+from app.chain.payload import MAX_UINT256  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "display",
+    [
+        "12345678901234567890123456.123456",  # was rounded by Decimal's 28-digit context
+        "99999999999999999999999.999999",  # was rounded up to 1e23
+        f"{MAX_UINT256 // 10**6}.{MAX_UINT256 % 10**6:06d}",  # exactly uint256 max at 6 dp
+    ],
+)
+def test_parse_amount_is_exact_for_large_values(display):
+    whole, _, frac = display.partition(".")
+    assert parse_amount(display, 6) == int(whole + frac.ljust(6, "0"))
+
+
+@pytest.mark.parametrize(
+    "display",
+    ["1e999999999", "1E6", "1e-6", "+1", " 1", "1 ", "1,000", "1_000", ".5", "5.", "0x10", "١٢"],
+)
+def test_parse_amount_rejects_non_plain_forms_without_crashing(display):
+    with pytest.raises(PayloadError):
+        parse_amount(display, 6)
+
+
+def test_parse_amount_rejects_oversized_input():
+    with pytest.raises(PayloadError):
+        parse_amount("1" * 101, 6)
+    with pytest.raises(PayloadError):
+        parse_amount("1" * 80, 6)  # above uint256
+
+
+def test_parse_amount_rejects_value_above_uint256():
+    above = MAX_UINT256 + 1
+    with pytest.raises(PayloadError):
+        parse_amount(f"{above // 10**6}.{above % 10**6:06d}", 6)
+
+
+GOOD_CHECKSUM = "0xfA339b0Fc9D01073AF67B668ba5813d677B85956"
+
+
+def test_require_address_accepts_valid_checksum_and_single_case():
+    from app.chain.payload import require_address
+
+    assert require_address(GOOD_CHECKSUM, "a") == GOOD_CHECKSUM
+    assert require_address(GOOD_CHECKSUM.lower(), "a") == GOOD_CHECKSUM
+    assert require_address("0x" + GOOD_CHECKSUM[2:].upper(), "a") == GOOD_CHECKSUM
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "0xFa339b0Fc9D01073AF67B668ba5813d677B85956",  # one letter's case flipped: bad checksum
+        "fA339b0Fc9D01073AF67B668ba5813d677B85956",  # no 0x
+        "0xfA339b0Fc9D01073AF67B668ba5813d677B8595",  # 39 hex chars
+        "0xgA339b0Fc9D01073AF67B668ba5813d677B85956",  # non-hex
+        " 0xfA339b0Fc9D01073AF67B668ba5813d677B85956",
+    ],
+)
+def test_require_address_rejects_bad_checksum_and_malformed(value):
+    from app.chain.payload import require_address
+
+    with pytest.raises(PayloadError):
+        require_address(value, "a")

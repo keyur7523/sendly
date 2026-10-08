@@ -60,6 +60,9 @@ class PrepareRequest(BaseModel):
 class SignedRequest(BaseModel):
     prepared_id: str
     signed_transaction: str
+    allow_mismatch: bool = Field(
+        default=False, description="Diagnostics only: broadcast even if the signed tx differs from the prepared one"
+    )
 
 
 class VerifyRequest(BaseModel):
@@ -147,6 +150,7 @@ async def prepare(
 ):
     fee_override = body.max_fee_per_gas_gwei * 10**9 if body.max_fee_per_gas_gwei else None
     try:
+        await chain.check_chain()
         if body.kind == "token_transfer":
             if not body.recipient or not body.amount:
                 raise PayloadError("token_transfer requires recipient and amount")
@@ -196,6 +200,22 @@ async def broadcast(body: SignedRequest, user: CurrentUser, chain: Adapter, stor
     except PayloadError as exc:
         raise _error(400, "UNDECODABLE_SIGNED_TRANSACTION", str(exc)) from None
     comparison = compare(expected, observed)
+    matches = comparison.payload_matches and comparison.sender_matches and comparison.field_compliance == "matched"
+    if not matches and not body.allow_mismatch:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "SIGNED_TRANSACTION_MISMATCH",
+                "message": "signed transaction differs from the prepared one; not broadcast",
+                "comparison": asdict(comparison),
+            },
+        )
+    try:
+        await chain.check_chain()
+    except ChainMismatch as exc:
+        raise _error(503, "WRONG_NETWORK", str(exc)) from None
+    except (RpcError, RpcUnavailable) as exc:
+        raise _error(503, "CHAIN_UNAVAILABLE", str(exc)) from None
     result: dict[str, Any] = {"tx_hash": observed.hash, "comparison": asdict(comparison)}
     try:
         result["rpc_hash"] = await chain.broadcast(body.signed_transaction)

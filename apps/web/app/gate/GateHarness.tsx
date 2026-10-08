@@ -199,7 +199,7 @@ function PinnedSendCase({ call, address, onChainChange }: CaseProps) {
       setVerification(null);
       const prepared = await prepareTransfer(call, address, recipient || address, amount);
       push("Prepared (pinned)", prepared.pinned);
-      const { hash } = await sendTransaction(toWalletRequest(prepared), { address });
+      const { hash } = await withTimeout(sendTransaction(toWalletRequest(prepared), { address }), WALLET_TIMEOUT_MS);
       push("sendTransaction returned hash", hash);
       const final = await pollVerify(call, prepared.prepared_id, hash, (v) => setVerification(v));
       push("Verification", final);
@@ -263,7 +263,7 @@ function SignOnlyCase({ call, address, onChainChange }: CaseProps) {
       push("Prepared (pinned)", prepared.pinned);
       const request = toWalletRequest(prepared, nonceEncoding);
       push("Nonce sent to wallet", { encoding: nonceEncoding, value: request.nonce });
-      const { signature } = await signTransaction(request, { address });
+      const { signature } = await withTimeout(signTransaction(request, { address }), WALLET_TIMEOUT_MS);
       push("signTransaction returned", signature);
       try {
         const inspected = await call<{ comparison: Comparison; tx_hash: string }>("/v1/gate/inspect-signed", {
@@ -456,7 +456,7 @@ function ReplacementCase({ call, address, onChainChange }: CaseProps) {
       setReplacement(null);
       setPaymentBroadcast(null);
       const prepared = await prepareTransfer(call, address, address, "0.01");
-      const { signature } = await signTransaction(toWalletRequest(prepared), { address });
+      const { signature } = await withTimeout(signTransaction(toWalletRequest(prepared), { address }), WALLET_TIMEOUT_MS);
       const nonce = Number(prepared.pinned.nonce);
       push(`Payment signed at nonce ${nonce}, held (not broadcast)`, prepared.pinned);
       setHeld({ prepared, signed: signature, nonce });
@@ -471,7 +471,7 @@ function ReplacementCase({ call, address, onChainChange }: CaseProps) {
         nonce: held.nonce,
       });
       push("Replacement prepared", prepared.pinned);
-      const { hash } = await sendTransaction(toWalletRequest(prepared), { address });
+      const { hash } = await withTimeout(sendTransaction(toWalletRequest(prepared), { address }), WALLET_TIMEOUT_MS);
       push("Replacement hash", hash);
       const final = await pollVerify(call, prepared.prepared_id, hash, setReplacement);
       push("Replacement verification", final);
@@ -611,7 +611,12 @@ function useLog() {
       try {
         await fn();
       } catch (e) {
-        push("Error", e instanceof ApiError ? { code: e.code, message: e.message } : describeError(e));
+        if (e instanceof WalletTimeout) {
+          // PRD Section 10.2: silence from the wallet is an unknown outcome, never a failure.
+          push("Wallet outcome unknown", { timeout: true, message: e.message });
+        } else {
+          push("Error", e instanceof ApiError ? { code: e.code, message: e.message } : describeError(e));
+        }
       } finally {
         setBusy(false);
       }

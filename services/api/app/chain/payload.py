@@ -9,20 +9,24 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from decimal import Decimal, InvalidOperation
+import re
 from typing import Any
 
 from eth_abi import decode as abi_decode
 from eth_abi import encode as abi_encode
 from eth_account import Account
 from eth_account.typed_transactions import TypedTransaction
-from eth_utils import is_address, keccak, to_checksum_address
+from eth_utils import is_checksum_address, keccak, to_checksum_address
 from hexbytes import HexBytes
 
 TRANSFER_SELECTOR = keccak(text="transfer(address,uint256)")[:4]
 TRANSFER_EVENT_TOPIC = "0x" + keccak(text="Transfer(address,address,uint256)").hex()
 EIP7702_DELEGATION_PREFIX = bytes.fromhex("ef0100")
 MAX_UINT256 = 2**256 - 1
+# Plain decimal only: digits, optional fraction. No sign, exponent, whitespace, or separators.
+AMOUNT_PATTERN = re.compile(r"([0-9]+)(?:\.([0-9]+))?")  # ASCII digits only (\d matches any Unicode digit)
+MAX_AMOUNT_CHARS = 100  # far above any uint256 amount (78 digits) yet bounds the work done
+ADDRESS_PATTERN = re.compile(r"0x[0-9a-fA-F]{40}")
 
 # Fields that decide whether a transaction *is* the approved payment (matching rule).
 PAYLOAD_FIELDS = ("chain_id", "to", "data", "value")
@@ -126,23 +130,33 @@ class Comparison:
 
 
 def require_address(value: str, label: str) -> str:
-    if not is_address(value):
+    """Accept a 0x-prefixed 20-byte hex address. Mixed case must be a valid EIP-55 checksum,
+    so a mistyped checksummed address is rejected rather than silently normalized."""
+    if not isinstance(value, str) or not ADDRESS_PATTERN.fullmatch(value):
         raise PayloadError(f"{label} is not a valid address")
+    body = value[2:]
+    if body != body.lower() and body != body.upper() and not is_checksum_address(value):
+        raise PayloadError(f"{label} has an invalid EIP-55 checksum")
     return to_checksum_address(value)
 
 
 def parse_amount(display: str, decimals: int) -> int:
-    """Exact decimal string -> integer base units. Rejects over-precision; no floats."""
-    try:
-        amount = Decimal(display)
-    except InvalidOperation as exc:
-        raise PayloadError("amount is not a decimal number") from exc
-    if not amount.is_finite() or amount <= 0:
-        raise PayloadError("amount must be greater than zero")
-    exponent = amount.as_tuple().exponent
-    if isinstance(exponent, int) and -exponent > decimals:
+    """Exact decimal string -> integer base units, using integer arithmetic only.
+
+    Decimal/float are deliberately avoided: Decimal's default 28-digit context silently rounds
+    large values, and exponent notation can overflow. Over-precision is rejected, never rounded.
+    """
+    if not isinstance(display, str) or len(display) > MAX_AMOUNT_CHARS:
+        raise PayloadError("amount is too long")
+    match = AMOUNT_PATTERN.fullmatch(display)
+    if match is None:
+        raise PayloadError("amount must be a plain decimal number, e.g. 15 or 15.25")
+    whole, fraction = match.group(1), match.group(2) or ""
+    if len(fraction) > decimals:
         raise PayloadError(f"amount has more than {decimals} decimal places")
-    base_units = int(amount.scaleb(decimals))
+    base_units = int(whole) * 10**decimals + int(fraction.ljust(decimals, "0") or "0")
+    if base_units <= 0:
+        raise PayloadError("amount must be greater than zero")
     if base_units > MAX_UINT256:
         raise PayloadError("amount is too large")
     return base_units

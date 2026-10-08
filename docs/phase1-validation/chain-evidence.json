@@ -1,0 +1,120 @@
+{
+  "chain_id": 10143,
+  "wallet_type": {
+    "wallet_type": "eoa",
+    "delegated": false
+  },
+  "finalized_block": 69139613,
+  "transactions": {
+    "product_transfer": {
+      "hash": "0xa088ee2fa8d06337e5629a31baac1e5ab53f14c61ae2529ee85299d1fa118a43",
+      "found": true,
+      "receipt_found": true,
+      "from": "0xfa339b0fc9d01073af67b668ba5813d677b85956",
+      "to": "0x701c0eab78ba95d7604ee316c52e8ff88f63a9f5",
+      "nonce": "0x8",
+      "gas": "0x99ce",
+      "maxFeePerGas": "0x2f08236400",
+      "maxPriorityFeePerGas": "0x77359400",
+      "value": "0x0",
+      "input": "0xa9059cbb000000000000000000000000fa339b0fc9d01073af67b668ba5813d677b859560000000000000000000000000000000000000000000000000000000000002710",
+      "chainId": "0x279f",
+      "type": "0x2",
+      "status": 1,
+      "block": 69135521,
+      "canonical": true
+    },
+    "held_replacement_winner": {
+      "hash": "0x52c65134da910985e57cfe060d8bdd3667cc0babf58542381bec8ffeeea41053",
+      "found": true,
+      "receipt_found": true,
+      "from": "0xfa339b0fc9d01073af67b668ba5813d677b85956",
+      "to": "0xfa339b0fc9d01073af67b668ba5813d677b85956",
+      "nonce": "0x2",
+      "gas": "0x5208",
+      "maxFeePerGas": "0x2f08236400",
+      "maxPriorityFeePerGas": "0x77359400",
+      "value": "0x0",
+      "input": "0x",
+      "chainId": "0x279f",
+      "type": "0x2",
+      "status": 1,
+      "block": 69059709,
+      "canonical": true
+    },
+    "queued_original": {
+      "hash": "0x7504b67ec2dde94476f390e702d3933716620256c837b3ece74effae7bf43a20",
+      "found": true,
+      "receipt_found": true,
+      "from": "0xfa339b0fc9d01073af67b668ba5813d677b85956",
+      "to": "0x701c0eab78ba95d7604ee316c52e8ff88f63a9f5",
+      "nonce": "0xa",
+      "gas": "0x99ce",
+      "maxFeePerGas": "0x2f08236400",
+      "maxPriorityFeePerGas": "0x77359400",
+      "value": "0x0",
+      "input": "0xa9059cbb000000000000000000000000fa339b0fc9d01073af67b668ba5813d677b859560000000000000000000000000000000000000000000000000000000000002710",
+      "chainId": "0x279f",
+      "type": "0x2",
+      "status": 1,
+      "block": 69136466,
+      "canonical": true
+    },
+    "queued_replacement": {
+      "hash": "0xbc582e0b337517d77e9efa7c7d9cd18e692c11913441b55eba4c270e54446649",
+      "found": false,
+      "receipt_found": false
+    },
+    "gap_filler": {
+      "hash": "0x387f58481d04eb86cff0349b894d62a3694830a906696dd0bfa2afa2c41a35f2",
+      "found": true,
+      "receipt_found": true,
+      "from": "0xfa339b0fc9d01073af67b668ba5813d677b85956",
+      "to": "0x701c0eab78ba95d7604ee316c52e8ff88f63a9f5",
+      "nonce": "0x9",
+      "gas": "0x99ce",
+      "maxFeePerGas": "0x2f08236400",
+      "maxPriorityFeePerGas": "0x77359400",
+      "value": "0x0",
+      "input": "0xa9059cbb000000000000000000000000fa339b0fc9d01073af67b668ba5813d677b859560000000000000000000000000000000000000000000000000000000000002710",
+      "chainId": "0x279f",
+      "type": "0x2",
+      "status": 1,
+      "block": 69136465,
+      "canonical": true
+    }
+  },
+  "adapter_product_verification": {
+    "status": "finalized",
+    "observed": {
+      "hash": "0xa088ee2fa8d06337e5629a31baac1e5ab53f14c61ae2529ee85299d1fa118a43",
+      "sender": "0xfA339b0Fc9D01073AF67B668ba5813d677B85956",
+      "chain_id": 10143,
+      "to": "0x701C0eAB78ba95d7604Ee316C52e8FF88f63a9F5",
+      "data": "0xa9059cbb000000000000000000000000fa339b0fc9d01073af67b668ba5813d677b859560000000000000000000000000000000000000000000000000000000000002710",
+      "value": 0,
+      "nonce": 8,
+      "gas": 39374,
+      "max_fee_per_gas": 202000000000,
+      "max_priority_fee_per_gas": 2000000000,
+      "type": 2
+    },
+    "comparison": {
+      "payload_matches": true,
+      "payload_differences": [],
+      "sender_matches": true,
+      "field_compliance": "matched",
+      "compliance_differences": []
+    },
+    "receipt_status": "success",
+    "block_number": 69135521,
+    "finalized_block_number": 69139618,
+    "transfer_event_found": true,
+    "fee_charged": 4016148000000000
+  },
+  "token_metadata": {
+    "decimals": 6,
+    "symbol": "DemoUSD",
+    "owner": "0x4205e140dcf661bde478236cd760386b12f3c197"
+  }
+}

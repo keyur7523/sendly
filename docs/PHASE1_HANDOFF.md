@@ -2,7 +2,7 @@
 
 **Purpose of this document:** give a second reviewer (human or AI agent) everything needed to understand where Sendly's Phase 1 stands, how to run it locally, every problem hit so far and how it was resolved, and the one open blocker that needs a decision. It is written to be read without access to the original conversation.
 
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-07 (hardening pass)
 **Repository:** https://github.com/keyur7523/sendly (local checkout: `~/projects/sendly`)
 **Specs:** [`VOICE_PAYMENTS_PRD.md`](../VOICE_PAYMENTS_PRD.md) (v1.4, behavior and authorization) and [`SENDLY_DESIGN_GUIDE.md`](../SENDLY_DESIGN_GUIDE.md) (v1.1, visual layout). Both live only in this repository; ignore any copies elsewhere.
 
@@ -250,6 +250,11 @@ Status legend: ✅ resolved · ⚠️ worked around · ❌ open
 | P30 | Harness | `/v1/gate/broadcast` broadcasts even when the signed transaction mismatches | Deliberate, to observe network behaviour in check 3 | ⚠️ Product broadcast must reject mismatches (§7.2) |
 | P31 | Monad | Same-nonce, higher-fee replacement of a queued transaction was accepted by the RPC but never included; the original won | First-seen semantics / no replace-by-fee observed on testnet | ❌ PRD §10.6 needs revisiting (§7.3) |
 | P32 | Monad | Transactions with `maxFeePerGas` below base fee rejected at submission | RPC validation | ✅ Good: no stuck-underpriced state |
+| P33 | Backend | Large amounts silently rounded (`12345678901234567890123456.123456` → `…120000`) | `Decimal` default 28-digit context | ✅ Integer-only parser, ASCII digits only; regression tests |
+| P34 | Backend | `1e999999999` crashed `prepare` (500) | `decimal.Overflow` uncaught | ✅ Plain-decimal pattern + 100-char cap; regression tests |
+| P35 | Backend | Mistyped checksummed address accepted and "corrected" | `is_address` + `to_checksum_address` normalizes | ✅ Mixed case must pass EIP-55; regression tests |
+| P36 | Backend | `prepare`/`broadcast` did not verify the RPC's chain ID | Only `/wallet` checked it | ✅ Both check; broadcast also refuses mismatched signed transactions unless `allow_mismatch` (diagnostic) |
+| P37 | Backend | Unicode digits (`"١٢"`) accepted as an amount | `\d` and `int()` accept any Unicode digit | ✅ ASCII `[0-9]` only (found by the new tests) |
 | P28 | Privy config | Dashboard config shows `create_on_login: "off"` while the client sets `createOnLogin: "users-without-wallets"`; wallets are still created | Client config applies | ⚠️ Note only; verify if wallet creation ever fails |
 
 ---

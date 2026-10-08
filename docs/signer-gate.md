@@ -4,15 +4,17 @@ Payment execution is enabled only for a **signer qualification**: a wallet provi
 
 ## Checks
 
-| # | Check | Harness case | Passes when |
+Criteria match PRD v1.5 Section 10.4. Every signer criterion is judged on the **decoded signed transaction**, not on whether a transaction later wins a race on-chain.
+
+| # | Signer criterion | Harness case | Passes when |
 |---|---|---|---|
-| 1 | Pinned fields preserved | `pinned_send` | The broadcast transaction's nonce, gas limit, `maxFeePerGas`, and `maxPriorityFeePerGas` equal the pinned values (or the SDK errors instead of changing them); the transfer finalizes with the expected Transfer event |
-| 1b | Sign-only mode (informational) | `pinned_sign_only` | `signTransaction` returns a full signed transaction that decodes to the pinned fields before broadcast. Not required by the PRD; if it passes, it can narrow the crash window in Section 10.5 |
-| 2 | Explicit rejection is distinguishable | `explicit_rejection` | Pressing reject and closing the modal both yield an error that a stable field (not message text) distinguishes from a non-rejection failure |
-| 3 | Same-nonce replacement | `same_nonce_replacement` | The SDK signs a zero-value self-transfer at the specified nonce N; it finalizes at N; a payment signed earlier at N is then rejected by the network |
+| 1 | Signs exactly the requested transaction (sign-only, the product path) | `pinned_sign_only` | The decoded signed transaction carries the supplied nonce (including 0, sent as hex), gas limit, `maxFeePerGas`, `maxPriorityFeePerGas`, recipient, data, value, and chain ID, or the call errors instead of changing them |
+| 1s | Same, in send mode (diagnostic only) | `pinned_send` | As 1, observed on the broadcast transaction; send mode is not used on the product path |
+| 2 | Refusal distinguishable from failure | `explicit_rejection` | ✕ and Esc yield an error a stable field distinguishes from a network/provider failure |
+| 3 | Replacement signed as requested while another transaction at that nonce is outstanding | `same_nonce_replacement` | A zero-value self-transfer at the specified nonce, with the requested fee fields, decodes exactly while a different transaction at that nonce has been broadcast and not yet included |
 | 4 | Wallet type | `wallet_type` | The embedded wallet is an undelegated EOA (no EIP-7702 delegation designator) |
 
-Known limitation of check 3: it holds the original payment unbroadcast (sign-only), so it shows that the SDK honours a specified nonce and that one transaction per nonce is included. It does not test a payment that is genuinely pending in a node's mempool.
+**Network observations (recorded, not signer criteria):** whether a replacement is included; how the RPC treats underpriced and future-nonce transactions.
 
 ## How to run
 
@@ -22,9 +24,9 @@ See the root `README.md` (Phase 1). Each case on `/gate` has **Record pass / fai
 
 Fill in from `results.jsonl` after a run. Do not mark the signer qualified unless checks 1–4 all pass.
 
-| Date | Provider / SDK | Wallet type | 1 | 1b | 2 | 3 | 4 | Qualified? | Notes |
+| Date | Provider / SDK | Wallet type | 1 | 1s | 2 | 3 | 4 | Qualified? | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| 2026-10-07 (corrected) | `@privy-io/react-auth` 3.47.0 (user-controlled server wallets) | Undelegated EOA | **Pass** (nonce must be hex) | **Pass** (nonce must be hex) | Pass | **Fail on Monad** (queued original won; replacement never included) | Pass | **Yes, with conditions** | All pinned fields preserved when the nonce is sent as a hex string. A numeric `0` is dropped by Privy's truthiness check. The first run's nonce failure was this encoding bug. Product path: sign-only + backend broadcast. |
+| 2026-10-07 (v1.5 criteria) | `@privy-io/react-auth` 3.47.0 (user-controlled server wallets) | Undelegated EOA | **Pass** (hex nonce; `0x0`→0, `0x3`→3, 3→3) | **Pass** (diagnostic; hex `0x0`→0) | **Pass** (4001 vs -32000) | **Pass** (replacement `0xbc58…6649` signed at nonce 10, 300 gwei, decoded exactly while payment `0x7504…3a20` was outstanding) | Pass | **Yes** | Network observation: the queued original was included, the replacement was not; underpriced transactions rejected at submission. Numeric nonce `0` is dropped by Privy, so the integration must send hex. |
 
 ## Findings that affect the PRD
 
